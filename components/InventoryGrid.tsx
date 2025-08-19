@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Package, ShoppingCart, CheckCircle, Euro, ChevronDown, ChevronUp, Users, Shirt } from 'lucide-react'
+import { Package, ShoppingCart, CheckCircle, Euro, ChevronDown, ChevronUp, Users, Shirt, MoreVertical, Trash2 } from 'lucide-react'
 import { inventoryService, salesService } from '../lib/supabase'
 import { InventoryItem } from '../types'
 
@@ -29,7 +29,90 @@ interface ClubGroup {
   sold: number
 }
 
-interface SaleModalProps {
+interface DropdownMenuProps {
+  items: InventoryItem[]
+  onAction: (action: string, items: InventoryItem[]) => void
+  title: string
+}
+
+const DropdownMenu: React.FC<DropdownMenuProps> = ({ items, onAction, title }) => {
+  const [isOpen, setIsOpen] = useState(false)
+  
+  const availableItems = items.filter(item => item.status !== 'Sold')
+  const hasAvailableItems = availableItems.length > 0
+  
+  if (!hasAvailableItems) return null
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="inline-flex items-center px-2 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700"
+      >
+        <MoreVertical className="w-3 h-3" />
+      </button>
+      
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+          <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-20">
+            <div className="py-1">
+              <div className="px-3 py-2 text-xs font-medium text-gray-500 border-b">
+                {title}
+              </div>
+              
+              <button
+                onClick={() => {
+                  onAction('mark-in-stock', availableItems)
+                  setIsOpen(false)
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+              >
+                <Package className="w-4 h-4 mr-2 text-blue-600" />
+                Mark as In Stock
+              </button>
+              
+              <button
+                onClick={() => {
+                  onAction('mark-listed', availableItems)
+                  setIsOpen(false)
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+              >
+                <ShoppingCart className="w-4 h-4 mr-2 text-yellow-600" />
+                Mark as Listed
+              </button>
+              
+              <button
+                onClick={() => {
+                  onAction('mark-sold', availableItems)
+                  setIsOpen(false)
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+              >
+                <Euro className="w-4 h-4 mr-2 text-green-600" />
+                Mark as Sold
+              </button>
+              
+              <div className="border-t border-gray-100">
+                <button
+                  onClick={() => {
+                    onAction('delete', items.filter(item => item.status !== 'Sold'))
+                    setIsOpen(false)
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete Items
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
   selectedItems: InventoryItem[]
   isOpen: boolean
   onClose: () => void
@@ -209,6 +292,7 @@ const InventoryGrid: React.FC = () => {
   const [expandedClubs, setExpandedClubs] = useState<Set<string>>(new Set())
   const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set())
   const [expandedSizes, setExpandedSizes] = useState<Set<string>>(new Set())
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
     fetchInventory()
@@ -301,6 +385,65 @@ const InventoryGrid: React.FC = () => {
     return Array.from(clubs.values())
   }, [inventory, filter])
 
+  const handleAction = async (action: string, items: InventoryItem[]) => {
+    try {
+      setMessage(null)
+      
+      switch (action) {
+        case 'mark-in-stock':
+          for (const item of items) {
+            if (item.status !== 'Sold') {
+              await inventoryService.updateStatus(item.id, 'In Stock')
+            }
+          }
+          setMessage({ type: 'success', text: `${items.length} items marked as In Stock` })
+          break
+          
+        case 'mark-listed':
+          for (const item of items) {
+            if (item.status !== 'Sold') {
+              await inventoryService.updateStatus(item.id, 'Listed')
+            }
+          }
+          setMessage({ type: 'success', text: `${items.length} items marked as Listed` })
+          break
+          
+        case 'mark-sold':
+          // For sold, we still want to open the sale modal to record details
+          const availableItems = items.filter(item => item.status !== 'Sold')
+          if (availableItems.length > 0) {
+            const firstItem = availableItems[0]
+            setSelectedItems(availableItems)
+            setSaleModalTitle(`${firstItem.club} ${firstItem.player || 'No Name'} ${firstItem.size}`)
+            setShowSaleModal(true)
+            return // Don't show success message yet, will show after sale is recorded
+          }
+          break
+          
+        case 'delete':
+          const confirmDelete = confirm(`Are you sure you want to permanently delete ${items.length} item(s)? This action cannot be undone.`)
+          if (confirmDelete) {
+            for (const item of items) {
+              await inventoryService.delete(item.id)
+            }
+            setMessage({ type: 'success', text: `${items.length} items deleted permanently` })
+          }
+          break
+      }
+      
+      fetchInventory()
+      
+      // Clear message after 3 seconds
+      if (action !== 'mark-sold') {
+        setTimeout(() => setMessage(null), 3000)
+      }
+    } catch (error) {
+      console.error('Error performing action:', error)
+      setMessage({ type: 'error', text: 'Error performing action. Please try again.' })
+      setTimeout(() => setMessage(null), 3000)
+    }
+  }
+
   const handleSellItems = (items: InventoryItem[], title: string) => {
     const availableItems = items.filter(item => item.status === 'In Stock' || item.status === 'Listed')
     if (availableItems.length === 0) return
@@ -367,6 +510,18 @@ const InventoryGrid: React.FC = () => {
           }).length} items
         </div>
       </div>
+
+      {/* Message Display */}
+      {message && (
+        <div className={`p-4 rounded-md ${message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+          <div className="flex">
+            <div className="h-5 w-5 mr-2">
+              {message.type === 'success' ? '✓' : '⚠'}
+            </div>
+            <span>{message.text}</span>
+          </div>
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="border-b border-gray-200">
@@ -636,6 +791,21 @@ const InventoryGrid: React.FC = () => {
                                             >
                                               Sell
                                             </button>
+                                            <DropdownMenu
+                                              items={[item]}
+                                              onAction={handleAction}
+                                              title={item.sku}
+                                            />
+                                          </div>
+                                        )}
+                                        {item.status === 'Sold' && (
+                                          <div className="flex space-x-1">
+                                            <span className="text-xs text-green-600">Sold</span>
+                                            <DropdownMenu
+                                              items={[item]}
+                                              onAction={handleAction}
+                                              title={item.sku}
+                                            />
                                           </div>
                                         )}
                                       </td>
