@@ -279,20 +279,6 @@ const AddStock: React.FC = () => {
         </div>
       )}
 
-      {/* Expense Preview */}
-      <div className="bg-blue-50 border-l-4 border-blue-400 p-4">
-        <div className="flex">
-          <div className="flex-shrink-0">
-            <Package className="h-5 w-5 text-blue-400" />
-          </div>
-          <div className="ml-3">
-            <p className="text-sm text-blue-700">
-              <strong>Auto-Expense:</strong> Adding this stock will automatically create a €{getTotalCost().toFixed(2)} expense under "Stock Purchase"
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* Single Item Form */}
       {activeTab === 'single' && (
         <div className="bg-white rounded-lg shadow p-6">
@@ -315,16 +301,6 @@ const AddStock: React.FC = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   required
                 />
-                {existingClubs.length > 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    💡 Start typing to see suggestions from your {existingClubs.length} existing clubs
-                  </p>
-                )}
-                {existingClubs.length > 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    💡 Start typing to see suggestions from your {existingClubs.length} existing clubs
-                  </p>
-                )}
                 
                 {/* Club Suggestions */}
                 {showClubSuggestions && clubSuggestions.length > 0 && (
