@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { TrendingUp, Calendar, Euro, Edit, Trash2, AlertCircle } from 'lucide-react'
 import Layout from '../components/Layout'
-import { salesService } from '../lib/supabase'
+import { salesService, inventoryService } from '../lib/supabase'
 import { Sale } from '../types'
 
 interface EditSaleModalProps {
@@ -194,9 +194,16 @@ const SalesPage: React.FC = () => {
     }
 
     try {
+      // First delete the sale
       await salesService.delete(sale.id)
-      // Note: You might want to also update the inventory status back to 'Listed' or 'In Stock'
-      setMessage({ type: 'success', text: 'Sale deleted successfully!' })
+      
+      // Then revert the inventory item status back to 'Listed' 
+      // (assuming it was listed before being sold)
+      if (sale.inventory_id) {
+        await inventoryService.updateStatus(sale.inventory_id, 'Listed')
+      }
+      
+      setMessage({ type: 'success', text: 'Sale deleted successfully and inventory status reverted!' })
       fetchSales()
       setTimeout(() => setMessage(null), 3000)
     } catch (error) {
