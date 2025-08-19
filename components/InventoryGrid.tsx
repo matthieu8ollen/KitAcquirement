@@ -1,38 +1,63 @@
 import React, { useState, useEffect } from 'react'
-import { Package, ShoppingCart, CheckCircle, Euro, Edit, Trash2 } from 'lucide-react'
+import { Package, ShoppingCart, CheckCircle, Euro, ChevronDown, ChevronUp } from 'lucide-react'
 import { inventoryService, salesService } from '../lib/supabase'
 import { InventoryItem } from '../types'
 
+interface GroupedItem {
+  club: string
+  player: string | null
+  size: string
+  cost: number
+  items: InventoryItem[]
+  inStock: number
+  listed: number
+  sold: number
+}
+
 interface SaleModalProps {
-  item: InventoryItem | null
+  group: GroupedItem | null
   isOpen: boolean
   onClose: () => void
   onSave: () => void
 }
 
-const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) => {
+const SaleModal: React.FC<SaleModalProps> = ({ group, isOpen, onClose, onSave }) => {
+  const [selectedSKU, setSelectedSKU] = useState('')
   const [salePrice, setSalePrice] = useState('20.00')
   const [platform, setPlatform] = useState('Vinted')
-  const [platformFees, setPlatformFees] = useState('0.00') // Changed from 1.20 to 0.00
+  const [platformFees, setPlatformFees] = useState('0.00')
   const [shippingCost, setShippingCost] = useState('0.00')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (group && group.items.length > 0) {
+      // Default to first available item (In Stock or Listed)
+      const availableItem = group.items.find(item => item.status === 'In Stock' || item.status === 'Listed')
+      if (availableItem) {
+        setSelectedSKU(availableItem.id)
+      }
+    }
+  }, [group])
 
   const calculateProfit = () => {
     const price = parseFloat(salePrice) || 0
     const fees = parseFloat(platformFees) || 0
     const shipping = parseFloat(shippingCost) || 0
-    const cost = item?.cost || 0
+    const cost = group?.cost || 0
     return price - fees - shipping - cost
   }
 
   const handleSave = async () => {
-    if (!item) return
+    if (!group || !selectedSKU) return
+
+    const selectedItem = group.items.find(item => item.id === selectedSKU)
+    if (!selectedItem) return
 
     setLoading(true)
     try {
       // Create sale record
       await salesService.create({
-        inventory_id: item.id,
+        inventory_id: selectedItem.id,
         sale_price: parseFloat(salePrice),
         platform,
         platform_fees: parseFloat(platformFees),
@@ -41,7 +66,7 @@ const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) 
       })
 
       // Update inventory status
-      await inventoryService.updateStatus(item.id, 'Sold')
+      await inventoryService.updateStatus(selectedItem.id, 'Sold')
       
       onSave()
       onClose()
@@ -52,14 +77,35 @@ const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) 
     }
   }
 
-  if (!isOpen || !item) return null
+  if (!isOpen || !group) return null
+
+  const availableItems = group.items.filter(item => item.status === 'In Stock' || item.status === 'Listed')
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg max-w-md w-full p-6">
-        <h3 className="text-lg font-semibold mb-4">Record Sale - {item.sku}</h3>
+        <h3 className="text-lg font-semibold mb-4">
+          Record Sale - {group.club} {group.player || 'No Name'} ({group.size})
+        </h3>
         
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Select Specific Kit</label>
+            <select
+              value={selectedSKU}
+              onChange={(e) => setSelectedSKU(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+            >
+              <option value="">Choose which kit to sell</option>
+              {availableItems.map(item => (
+                <option key={item.id} value={item.id}>
+                  {item.sku} ({item.status})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Sale Price (€)</label>
             <input
@@ -112,7 +158,7 @@ const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) 
           <div className="bg-gray-50 p-3 rounded-md">
             <div className="flex justify-between text-sm">
               <span>Cost:</span>
-              <span>€{item.cost.toFixed(2)}</span>
+              <span>€{group.cost.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm font-semibold text-green-600">
               <span>Profit:</span>
@@ -132,7 +178,7 @@ const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) 
           <button
             onClick={handleSave}
             className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-            disabled={loading}
+            disabled={loading || !selectedSKU}
           >
             {loading ? 'Saving...' : 'Mark as Sold'}
           </button>
@@ -145,9 +191,10 @@ const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) 
 const InventoryGrid: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'In Stock' | 'Listed' | 'Sold'>('In Stock') // Changed default to 'In Stock'
-  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
+  const [filter, setFilter] = useState<'all' | 'In Stock' | 'Listed' | 'Sold'>('In Stock')
+  const [selectedGroup, setSelectedGroup] = useState<GroupedItem | null>(null)
   const [showSaleModal, setShowSaleModal] = useState(false)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchInventory()
@@ -164,10 +211,75 @@ const InventoryGrid: React.FC = () => {
     }
   }
 
-  const handleStatusChange = async (item: InventoryItem, newStatus: 'In Stock' | 'Listed' | 'Sold') => {
+  // Group identical items together
+  const groupedInventory = React.useMemo(() => {
+    const groups = new Map<string, GroupedItem>()
+    
+    inventory.forEach(item => {
+      const key = `${item.club}-${item.player || 'No Name'}-${item.size}`
+      
+      if (!groups.has(key)) {
+        groups.set(key, {
+          club: item.club,
+          player: item.player,
+          size: item.size,
+          cost: item.cost,
+          items: [],
+          inStock: 0,
+          listed: 0,
+          sold: 0
+        })
+      }
+      
+      const group = groups.get(key)!
+      group.items.push(item)
+      
+      if (item.status === 'In Stock') group.inStock++
+      else if (item.status === 'Listed') group.listed++
+      else if (item.status === 'Sold') group.sold++
+    })
+    
+    return Array.from(groups.values())
+  }, [inventory])
+
+  const filteredGroups = groupedInventory.filter(group => {
+    if (filter === 'all') return true
+    if (filter === 'In Stock') return group.inStock > 0
+    if (filter === 'Listed') return group.listed > 0
+    if (filter === 'Sold') return group.sold > 0
+    return false
+  })
+
+  const handleBulkStatusChange = async (group: GroupedItem, newStatus: 'In Stock' | 'Listed' | 'Sold') => {
     if (newStatus === 'Sold') {
-      setSelectedItem(item)
+      setSelectedGroup(group)
       setShowSaleModal(true)
+      return
+    }
+
+    try {
+      // Update all items in the group that are not sold
+      const availableItems = group.items.filter(item => item.status !== 'Sold')
+      for (const item of availableItems) {
+        await inventoryService.updateStatus(item.id, newStatus)
+      }
+      fetchInventory()
+    } catch (error) {
+      console.error('Error updating status:', error)
+    }
+  }
+
+  const handleSingleStatusChange = async (item: InventoryItem, newStatus: 'In Stock' | 'Listed' | 'Sold') => {
+    if (newStatus === 'Sold') {
+      const group = groupedInventory.find(g => 
+        g.club === item.club && 
+        (g.player || 'No Name') === (item.player || 'No Name') && 
+        g.size === item.size
+      )
+      if (group) {
+        setSelectedGroup(group)
+        setShowSaleModal(true)
+      }
       return
     }
 
@@ -179,27 +291,15 @@ const InventoryGrid: React.FC = () => {
     }
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'In Stock': return 'bg-blue-100 text-blue-800'
-      case 'Listed': return 'bg-yellow-100 text-yellow-800'
-      case 'Sold': return 'bg-green-100 text-green-800'
-      default: return 'bg-gray-100 text-gray-800'
+  const toggleGroupExpansion = (groupKey: string) => {
+    const newExpanded = new Set(expandedGroups)
+    if (newExpanded.has(groupKey)) {
+      newExpanded.delete(groupKey)
+    } else {
+      newExpanded.add(groupKey)
     }
+    setExpandedGroups(newExpanded)
   }
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'In Stock': return <Package className="w-4 h-4" />
-      case 'Listed': return <ShoppingCart className="w-4 h-4" />
-      case 'Sold': return <CheckCircle className="w-4 h-4" />
-      default: return <Package className="w-4 h-4" />
-    }
-  }
-
-  const filteredInventory = inventory.filter(item => 
-    filter === 'all' || item.status === filter
-  )
 
   const statusCounts = {
     'In Stock': inventory.filter(item => item.status === 'In Stock').length,
@@ -216,7 +316,7 @@ const InventoryGrid: React.FC = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Inventory</h1>
         <div className="text-sm text-gray-500">
-          {filteredInventory.length} of {inventory.length} items
+          {filteredGroups.length} groups • {inventory.length} total items
         </div>
       </div>
 
@@ -244,9 +344,9 @@ const InventoryGrid: React.FC = () => {
         </nav>
       </div>
 
-      {/* Inventory Table */}
+      {/* Grouped Inventory Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
-        {filteredInventory.length === 0 ? (
+        {filteredGroups.length === 0 ? (
           <div className="text-center py-12">
             <Package className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No items found</h3>
@@ -260,13 +360,7 @@ const InventoryGrid: React.FC = () => {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    SKU
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Club
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Player
+                    Kit Details
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Size
@@ -275,7 +369,10 @@ const InventoryGrid: React.FC = () => {
                     Cost
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
+                    Quantity
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status Summary
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
@@ -283,76 +380,131 @@ const InventoryGrid: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredInventory.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-mono text-gray-900">{item.sku}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{item.club}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{item.player || 'No Name'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{item.size}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">€{item.cost.toFixed(2)}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full flex items-center gap-1 ${getStatusColor(item.status)}`}>
-                        {getStatusIcon(item.status)}
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {item.status === 'In Stock' && (
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleStatusChange(item, 'Listed')}
-                            className="inline-flex items-center px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
-                          >
-                            <ShoppingCart className="w-3 h-3 mr-1" />
-                            List
-                          </button>
-                          <button
-                            onClick={() => handleStatusChange(item, 'Sold')}
-                            className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                          >
-                            <Euro className="w-3 h-3 mr-1" />
-                            Sold
-                          </button>
-                        </div>
-                      )}
+                {filteredGroups.map((group) => {
+                  const groupKey = `${group.club}-${group.player || 'No Name'}-${group.size}`
+                  const isExpanded = expandedGroups.has(groupKey)
+                  const hasAvailableItems = group.inStock > 0 || group.listed > 0
+                  
+                  return (
+                    <React.Fragment key={groupKey}>
+                      {/* Group Header Row */}
+                      <tr className="hover:bg-gray-50 bg-gray-25">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center">
+                            <button
+                              onClick={() => toggleGroupExpansion(groupKey)}
+                              className="mr-2 text-gray-400 hover:text-gray-600"
+                            >
+                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </button>
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">{group.club}</div>
+                              <div className="text-sm text-gray-500">{group.player || 'No Name'}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{group.size}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">€{group.cost.toFixed(2)}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            {group.items.length} total
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex space-x-1">
+                            {group.inStock > 0 && (
+                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                                <Package className="w-3 h-3 mr-1" />
+                                {group.inStock}
+                              </span>
+                            )}
+                            {group.listed > 0 && (
+                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                <ShoppingCart className="w-3 h-3 mr-1" />
+                                {group.listed}
+                              </span>
+                            )}
+                            {group.sold > 0 && (
+                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                {group.sold}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {hasAvailableItems && (
+                            <div className="flex space-x-2">
+                              <button
+                                onClick={() => handleBulkStatusChange(group, 'Listed')}
+                                className="inline-flex items-center px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
+                              >
+                                <ShoppingCart className="w-3 h-3 mr-1" />
+                                List All
+                              </button>
+                              <button
+                                onClick={() => handleBulkStatusChange(group, 'Sold')}
+                                className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                              >
+                                <Euro className="w-3 h-3 mr-1" />
+                                Sell One
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
 
-                      {item.status === 'Listed' && (
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleStatusChange(item, 'In Stock')}
-                            className="inline-flex items-center px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
-                          >
-                            <Package className="w-3 h-3 mr-1" />
-                            Unlist
-                          </button>
-                          <button
-                            onClick={() => handleStatusChange(item, 'Sold')}
-                            className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                          >
-                            <Euro className="w-3 h-3 mr-1" />
-                            Sold
-                          </button>
-                        </div>
-                      )}
-
-                      {item.status === 'Sold' && (
-                        <div className="text-center text-xs text-green-600 font-medium">
-                          ✓ Sold
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      {/* Individual Items (when expanded) */}
+                      {isExpanded && group.items.map((item) => (
+                        <tr key={item.id} className="bg-gray-50">
+                          <td className="px-6 py-2 pl-12">
+                            <div className="text-xs font-mono text-gray-600">{item.sku}</div>
+                          </td>
+                          <td className="px-6 py-2">
+                            <div className="text-xs text-gray-600">-</div>
+                          </td>
+                          <td className="px-6 py-2">
+                            <div className="text-xs text-gray-600">-</div>
+                          </td>
+                          <td className="px-6 py-2">
+                            <div className="text-xs text-gray-600">Individual</div>
+                          </td>
+                          <td className="px-6 py-2">
+                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                              item.status === 'In Stock' ? 'bg-blue-100 text-blue-800' :
+                              item.status === 'Listed' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-green-100 text-green-800'
+                            }`}>
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-2">
+                            {item.status !== 'Sold' && (
+                              <div className="flex space-x-1">
+                                <button
+                                  onClick={() => handleSingleStatusChange(item, item.status === 'In Stock' ? 'Listed' : 'In Stock')}
+                                  className="inline-flex items-center px-1 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700"
+                                >
+                                  {item.status === 'In Stock' ? 'List' : 'Unlist'}
+                                </button>
+                                <button
+                                  onClick={() => handleSingleStatusChange(item, 'Sold')}
+                                  className="inline-flex items-center px-1 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                                >
+                                  Sell
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -361,11 +513,11 @@ const InventoryGrid: React.FC = () => {
 
       {/* Sale Modal */}
       <SaleModal
-        item={selectedItem}
+        group={selectedGroup}
         isOpen={showSaleModal}
         onClose={() => {
           setShowSaleModal(false)
-          setSelectedItem(null)
+          setSelectedGroup(null)
         }}
         onSave={fetchInventory}
       />
