@@ -136,12 +136,12 @@ const SaleModal: React.FC<SaleModalProps> = ({ selectedItems, isOpen, onClose, o
       // Default to first available item
       const availableItem = selectedItems.find(item => item.status === 'In Stock' || item.status === 'Listed')
       if (availableItem) {
-        setSelectedSKU(availableItem.id)
+        setSelectedQuantity(1)
       }
     }
   }, [selectedItems])
 
-  const selectedItem = selectedItems.find(item => item.id === selectedSKU)
+  const selectedItem = selectedItems[0] // Use first available item
 
   const calculateProfit = () => {
     const price = parseFloat(salePrice) || 0
@@ -272,7 +272,7 @@ const SaleModal: React.FC<SaleModalProps> = ({ selectedItems, isOpen, onClose, o
           <button
             onClick={handleSave}
             className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-            disabled={loading || !selectedSKU}
+            disabled={loading || selectedQuantity < 1}
           >
             {loading ? 'Saving...' : 'Mark as Sold'}
           </button>
