@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Package, ShoppingCart, CheckCircle, Euro, Eye, Edit } from 'lucide-react'
+import { Package, ShoppingCart, CheckCircle, Euro, Edit, Trash2 } from 'lucide-react'
 import { inventoryService, salesService } from '../lib/supabase'
 import { InventoryItem } from '../types'
 
@@ -13,7 +13,7 @@ interface SaleModalProps {
 const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) => {
   const [salePrice, setSalePrice] = useState('20.00')
   const [platform, setPlatform] = useState('Vinted')
-  const [platformFees, setPlatformFees] = useState('1.20')
+  const [platformFees, setPlatformFees] = useState('0.00') // Changed from 1.20 to 0.00
   const [shippingCost, setShippingCost] = useState('0.00')
   const [loading, setLoading] = useState(false)
 
@@ -145,7 +145,7 @@ const SaleModal: React.FC<SaleModalProps> = ({ item, isOpen, onClose, onSave }) 
 const InventoryGrid: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'In Stock' | 'Listed' | 'Sold'>('all')
+  const [filter, setFilter] = useState<'all' | 'In Stock' | 'Listed' | 'Sold'>('In Stock') // Changed default to 'In Stock'
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null)
   const [showSaleModal, setShowSaleModal] = useState(false)
 
@@ -244,88 +244,120 @@ const InventoryGrid: React.FC = () => {
         </nav>
       </div>
 
-      {/* Inventory Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredInventory.map((item) => (
-          <div key={item.id} className="bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow p-4">
-            {/* Header */}
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex-1">
-                <h3 className="font-semibold text-gray-900">{item.club}</h3>
-                <p className="text-sm text-gray-600">{item.player || 'No Name'}</p>
-                <p className="text-xs text-gray-500">Size: {item.size}</p>
-              </div>
-              <div className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 ${getStatusColor(item.status)}`}>
-                {getStatusIcon(item.status)}
-                {item.status}
-              </div>
-            </div>
-
-            {/* SKU and Cost */}
-            <div className="mb-4 space-y-1">
-              <p className="text-xs font-mono text-gray-500">{item.sku}</p>
-              <p className="text-sm text-gray-600">Cost: €{item.cost.toFixed(2)}</p>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="space-y-2">
-              {item.status === 'In Stock' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleStatusChange(item, 'Listed')}
-                    className="px-3 py-2 bg-yellow-600 text-white text-sm rounded-md hover:bg-yellow-700 flex items-center justify-center gap-1"
-                  >
-                    <ShoppingCart className="w-4 h-4" />
-                    List
-                  </button>
-                  <button
-                    onClick={() => handleStatusChange(item, 'Sold')}
-                    className="px-3 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 flex items-center justify-center gap-1"
-                  >
-                    <Euro className="w-4 h-4" />
-                    Sold
-                  </button>
-                </div>
-              )}
-
-              {item.status === 'Listed' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleStatusChange(item, 'In Stock')}
-                    className="px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 flex items-center justify-center gap-1"
-                  >
-                    <Package className="w-4 h-4" />
-                    Unlist
-                  </button>
-                  <button
-                    onClick={() => handleStatusChange(item, 'Sold')}
-                    className="px-3 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 flex items-center justify-center gap-1"
-                  >
-                    <Euro className="w-4 h-4" />
-                    Sold
-                  </button>
-                </div>
-              )}
-
-              {item.status === 'Sold' && (
-                <div className="text-center text-sm text-green-600 font-medium py-2">
-                  ✓ Sold
-                </div>
-              )}
-            </div>
+      {/* Inventory Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        {filteredInventory.length === 0 ? (
+          <div className="text-center py-12">
+            <Package className="mx-auto h-12 w-12 text-gray-400" />
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No items found</h3>
+            <p className="mt-1 text-sm text-gray-500">
+              {filter === 'all' ? 'No inventory items yet.' : `No items with status "${filter}".`}
+            </p>
           </div>
-        ))}
-      </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    SKU
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Club
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Player
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Size
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Cost
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredInventory.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-mono text-gray-900">{item.sku}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{item.club}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{item.player || 'No Name'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{item.size}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">€{item.cost.toFixed(2)}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full flex items-center gap-1 ${getStatusColor(item.status)}`}>
+                        {getStatusIcon(item.status)}
+                        {item.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {item.status === 'In Stock' && (
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleStatusChange(item, 'Listed')}
+                            className="inline-flex items-center px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
+                          >
+                            <ShoppingCart className="w-3 h-3 mr-1" />
+                            List
+                          </button>
+                          <button
+                            onClick={() => handleStatusChange(item, 'Sold')}
+                            className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                          >
+                            <Euro className="w-3 h-3 mr-1" />
+                            Sold
+                          </button>
+                        </div>
+                      )}
 
-      {filteredInventory.length === 0 && (
-        <div className="text-center py-12">
-          <Package className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">No items found</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            {filter === 'all' ? 'No inventory items yet.' : `No items with status "${filter}".`}
-          </p>
-        </div>
-      )}
+                      {item.status === 'Listed' && (
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleStatusChange(item, 'In Stock')}
+                            className="inline-flex items-center px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                          >
+                            <Package className="w-3 h-3 mr-1" />
+                            Unlist
+                          </button>
+                          <button
+                            onClick={() => handleStatusChange(item, 'Sold')}
+                            className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                          >
+                            <Euro className="w-3 h-3 mr-1" />
+                            Sold
+                          </button>
+                        </div>
+                      )}
+
+                      {item.status === 'Sold' && (
+                        <div className="text-center text-xs text-green-600 font-medium">
+                          ✓ Sold
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Sale Modal */}
       <SaleModal
