@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Plus, Package, AlertCircle } from 'lucide-react'
 import { inventoryService, expensesService } from '../lib/supabase'
 
