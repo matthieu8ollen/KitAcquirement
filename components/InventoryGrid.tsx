@@ -278,7 +278,7 @@ const InventoryGrid: React.FC = () => {
       
       sizeGroup.items.push(item)
       
-      // Update counts
+      // Update counts - only count this specific item
       if (item.status === 'In Stock') {
         sizeGroup.inStock++
         playerGroup.inStock++
@@ -293,7 +293,7 @@ const InventoryGrid: React.FC = () => {
         clubGroup.sold++
       }
       
-      sizeGroup.items.length++
+      // Update total item counts
       playerGroup.totalItems++
       clubGroup.totalItems++
     })
