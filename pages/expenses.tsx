@@ -1,8 +1,142 @@
 import React, { useState, useEffect } from 'react'
-import { DollarSign, Plus, Calendar, Tag, AlertCircle } from 'lucide-react'
+import { DollarSign, Plus, Calendar, Tag, AlertCircle, Edit, Trash2 } from 'lucide-react'
 import Layout from '../components/Layout'
 import { expensesService } from '../lib/supabase'
 import { Expense } from '../types'
+
+interface EditExpenseModalProps {
+  expense: Expense | null
+  isOpen: boolean
+  onClose: () => void
+  onSave: () => void
+}
+
+const EditExpenseModal: React.FC<EditExpenseModalProps> = ({ expense, isOpen, onClose, onSave }) => {
+  const [category, setCategory] = useState('')
+  const [description, setDescription] = useState('')
+  const [amount, setAmount] = useState('')
+  const [expenseDate, setExpenseDate] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const categories = [
+    'Stock Purchase',
+    'Packaging',
+    'Printing',
+    'Shipping',
+    'PayPal Fees',
+    'Marketing',
+    'Office Supplies',
+    'Other'
+  ]
+
+  useEffect(() => {
+    if (expense) {
+      setCategory(expense.category)
+      setDescription(expense.description || '')
+      setAmount(expense.amount.toString())
+      setExpenseDate(expense.expense_date)
+    }
+  }, [expense])
+
+  const handleSave = async () => {
+    if (!expense) return
+
+    setLoading(true)
+    try {
+      await expensesService.update(expense.id, {
+        category,
+        description: description || null,
+        amount: parseFloat(amount),
+        expense_date: expenseDate
+      })
+      
+      onSave()
+      onClose()
+    } catch (error) {
+      console.error('Error updating expense:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!isOpen || !expense) return null
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-lg max-w-md w-full p-6">
+        <h3 className="text-lg font-semibold mb-4">Edit Expense</h3>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+            >
+              <option value="">Select category</option>
+              {categories.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Amount (€)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
+            <input
+              type="date"
+              value={expenseDate}
+              onChange={(e) => setExpenseDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="e.g., 100 poly mailers from Amazon"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex space-x-3 mt-6">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            disabled={loading}
+          >
+            {loading ? 'Saving...' : 'Update Expense'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const ExpensesPage: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -17,6 +151,8 @@ const ExpensesPage: React.FC = () => {
   })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
 
   const categories = [
     'Stock Purchase',
@@ -66,11 +202,35 @@ const ExpensesPage: React.FC = () => {
       })
       setShowAddForm(false)
       fetchExpenses()
+      setTimeout(() => setMessage(null), 3000)
     } catch (error) {
       console.error('Error adding expense:', error)
       setMessage({ type: 'error', text: 'Error adding expense. Please try again.' })
+      setTimeout(() => setMessage(null), 3000)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleEdit = (expense: Expense) => {
+    setEditingExpense(expense)
+    setShowEditModal(true)
+  }
+
+  const handleDelete = async (expense: Expense) => {
+    if (!confirm(`Are you sure you want to delete this expense: ${expense.category} - €${expense.amount.toFixed(2)}?`)) {
+      return
+    }
+
+    try {
+      await expensesService.delete(expense.id)
+      setMessage({ type: 'success', text: 'Expense deleted successfully!' })
+      fetchExpenses()
+      setTimeout(() => setMessage(null), 3000)
+    } catch (error) {
+      console.error('Error deleting expense:', error)
+      setMessage({ type: 'error', text: 'Error deleting expense. Please try again.' })
+      setTimeout(() => setMessage(null), 3000)
     }
   }
 
@@ -263,6 +423,9 @@ const ExpensesPage: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Date
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -286,6 +449,24 @@ const ExpensesPage: React.FC = () => {
                         <div className="flex items-center">
                           <Calendar className="w-4 h-4 mr-1" />
                           {new Date(expense.expense_date).toLocaleDateString()}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleEdit(expense)}
+                            className="inline-flex items-center px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                          >
+                            <Edit className="w-3 h-3 mr-1" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(expense)}
+                            className="inline-flex items-center px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                          >
+                            <Trash2 className="w-3 h-3 mr-1" />
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -317,6 +498,17 @@ const ExpensesPage: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Edit Expense Modal */}
+        <EditExpenseModal
+          expense={editingExpense}
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false)
+            setEditingExpense(null)
+          }}
+          onSave={fetchExpenses}
+        />
       </div>
     </Layout>
   )
