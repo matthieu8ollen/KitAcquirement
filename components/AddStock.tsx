@@ -27,12 +27,52 @@ const AddStock: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>('single')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [existingClubs, setExistingClubs] = useState<string[]>([])
+  const [clubSuggestions, setClubSuggestions] = useState<string[]>([])
+  const [showClubSuggestions, setShowClubSuggestions] = useState(false)
 
-  const clubs = [
-    'Barcelona', 'Real Madrid', 'Liverpool', 'Bayern Munich', 
-    'Manchester United', 'Arsenal', 'PSG', 'Chelsea', 'Manchester City',
-    'AC Milan', 'Inter Milan', 'Juventus', 'Atletico Madrid', 'Borussia Dortmund'
-  ]
+  useEffect(() => {
+    fetchExistingClubs()
+  }, [])
+
+  const fetchExistingClubs = async () => {
+    try {
+      const inventory = await inventoryService.getAll()
+      const clubs = Array.from(new Set(inventory.map(item => item.club))).sort()
+      setExistingClubs(clubs)
+    } catch (error) {
+      console.error('Error fetching clubs:', error)
+    }
+  }
+
+  const handleClubInput = (value: string, formType: 'single' | 'bulk') => {
+    // Update the form
+    if (formType === 'single') {
+      setSingleForm({ ...singleForm, club: value })
+    } else {
+      setBulkForm({ ...bulkForm, club: value })
+    }
+
+    // Show suggestions if typing
+    if (value.length > 0) {
+      const filtered = existingClubs.filter(club => 
+        club.toLowerCase().includes(value.toLowerCase())
+      )
+      setClubSuggestions(filtered)
+      setShowClubSuggestions(filtered.length > 0)
+    } else {
+      setShowClubSuggestions(false)
+    }
+  }
+
+  const selectClubSuggestion = (club: string, formType: 'single' | 'bulk') => {
+    if (formType === 'single') {
+      setSingleForm({ ...singleForm, club })
+    } else {
+      setBulkForm({ ...bulkForm, club })
+    }
+    setShowClubSuggestions(false)
+  }
 
   const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 
@@ -105,6 +145,9 @@ const AddStock: React.FC = () => {
         text: `Successfully added ${singleForm.club} ${singleForm.player || 'No Name'} (${singleForm.size}) and recorded €${cost.toFixed(2)} expense!` 
       })
       setSingleForm({ club: '', player: '', size: '', cost: '9.20' })
+      
+      // Refresh clubs list for autocomplete
+      fetchExistingClubs()
     } catch (error) {
       console.error('Error adding item:', error)
       setMessage({ type: 'error', text: 'Error adding item. Please try again.' })
@@ -168,6 +211,9 @@ const AddStock: React.FC = () => {
         sizes: [{ size: 'M', quantity: 0 }, { size: 'L', quantity: 0 }, { size: 'XL', quantity: 0 }],
         cost: '9.20'
       })
+      
+      // Refresh clubs list for autocomplete
+      fetchExistingClubs()
     } catch (error) {
       console.error('Error adding bulk items:', error)
       setMessage({ type: 'error', text: 'Error adding items. Please try again.' })
@@ -253,19 +299,48 @@ const AddStock: React.FC = () => {
           <h2 className="text-lg font-semibold mb-4">Add Single Item</h2>
           <form onSubmit={handleSingleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Club</label>
-                <select
+                <input
+                  type="text"
                   value={singleForm.club}
-                  onChange={(e) => setSingleForm({ ...singleForm, club: e.target.value })}
+                  onChange={(e) => handleClubInput(e.target.value, 'single')}
+                  onBlur={() => setTimeout(() => setShowClubSuggestions(false), 200)}
+                  onFocus={() => {
+                    if (singleForm.club.length > 0 && clubSuggestions.length > 0) {
+                      setShowClubSuggestions(true)
+                    }
+                  }}
+                  placeholder="e.g., Ajax, Barcelona, Real Madrid..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   required
-                >
-                  <option value="">Select a club</option>
-                  {clubs.map(club => (
-                    <option key={club} value={club}>{club}</option>
-                  ))}
-                </select>
+                />
+                {existingClubs.length > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    💡 Start typing to see suggestions from your {existingClubs.length} existing clubs
+                  </p>
+                )}
+                {existingClubs.length > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    💡 Start typing to see suggestions from your {existingClubs.length} existing clubs
+                  </p>
+                )}
+                
+                {/* Club Suggestions */}
+                {showClubSuggestions && clubSuggestions.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                    {clubSuggestions.map((club) => (
+                      <button
+                        key={club}
+                        type="button"
+                        onClick={() => selectClubSuggestion(club, 'single')}
+                        className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-gray-100 last:border-b-0"
+                      >
+                        {club}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -325,19 +400,38 @@ const AddStock: React.FC = () => {
           <h2 className="text-lg font-semibold mb-4">Bulk Add Items</h2>
           <form onSubmit={handleBulkSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Club</label>
-                <select
+                <input
+                  type="text"
                   value={bulkForm.club}
-                  onChange={(e) => setBulkForm({ ...bulkForm, club: e.target.value })}
+                  onChange={(e) => handleClubInput(e.target.value, 'bulk')}
+                  onBlur={() => setTimeout(() => setShowClubSuggestions(false), 200)}
+                  onFocus={() => {
+                    if (bulkForm.club.length > 0 && clubSuggestions.length > 0) {
+                      setShowClubSuggestions(true)
+                    }
+                  }}
+                  placeholder="e.g., Ajax, Barcelona, Real Madrid..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                   required
-                >
-                  <option value="">Select a club</option>
-                  {clubs.map(club => (
-                    <option key={club} value={club}>{club}</option>
-                  ))}
-                </select>
+                />
+                
+                {/* Club Suggestions */}
+                {showClubSuggestions && clubSuggestions.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                    {clubSuggestions.map((club) => (
+                      <button
+                        key={club}
+                        type="button"
+                        onClick={() => selectClubSuggestion(club, 'bulk')}
+                        className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm border-b border-gray-100 last:border-b-0"
+                      >
+                        {club}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>
