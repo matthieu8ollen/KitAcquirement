@@ -113,6 +113,8 @@ const DropdownMenu: React.FC<DropdownMenuProps> = ({ items, onAction, title }) =
     </div>
   )
 }
+
+interface SaleModalProps {
   selectedItems: InventoryItem[]
   isOpen: boolean
   onClose: () => void
@@ -753,6 +755,11 @@ const InventoryGrid: React.FC = () => {
                                           >
                                             Sell One
                                           </button>
+                                          <DropdownMenu
+                                            items={sizeGroup.items}
+                                            onAction={handleAction}
+                                            title={`${clubGroup.club} ${playerGroup.player || 'No Name'} ${sizeGroup.size}`}
+                                          />
                                         </div>
                                       )}
                                     </td>
