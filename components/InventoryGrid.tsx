@@ -42,6 +42,7 @@ const DropdownMenu: React.FC<DropdownMenuProps> = ({ items, onAction, title }) =
   const hasAvailableItems = availableItems.length > 0
   const hasSoldItems = items.some(item => item.status === 'Sold')
   
+  // Show menu if there are available items OR if there are sold items (for delete option)
   if (!hasAvailableItems && !hasSoldItems) return null
   return (
     <div className="relative">
@@ -123,7 +124,7 @@ interface SaleModalProps {
 }
 
 const SaleModal: React.FC<SaleModalProps> = ({ selectedItems, isOpen, onClose, onSave, title }) => {
-  const [selectedSKU, setSelectedSKU] = useState('')
+  const [selectedQuantity, setSelectedQuantity] = useState(1)
   const [salePrice, setSalePrice] = useState('20.00')
   const [platform, setPlatform] = useState('Vinted')
   const [platformFees, setPlatformFees] = useState('0.00')
@@ -186,20 +187,17 @@ const SaleModal: React.FC<SaleModalProps> = ({ selectedItems, isOpen, onClose, o
         
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Select Specific Kit</label>
-            <select
-              value={selectedSKU}
-              onChange={(e) => setSelectedSKU(e.target.value)}
+            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity to Sell</label>
+            <input
+              type="number"
+              min="1"
+              max={availableItems.length}
+              value={selectedQuantity}
+              onChange={(e) => setSelectedQuantity(parseInt(e.target.value) || 1)}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               required
-            >
-              <option value="">Choose which kit to sell</option>
-              {availableItems.map(item => (
-                <option key={item.id} value={item.id}>
-                  {item.sku} ({item.status})
-                </option>
-              ))}
-            </select>
+            />
+            <p className="text-xs text-gray-500 mt-1">Available: {availableItems.length}</p>
           </div>
 
           <div>
