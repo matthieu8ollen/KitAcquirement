@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Plus, Package, AlertCircle } from 'lucide-react'
-import { inventoryService } from '../lib/supabase'
+import { inventoryService, expensesService } from '../lib/supabase'
 
 interface BulkAddForm {
   club: string
@@ -61,6 +61,20 @@ const AddStock: React.FC = () => {
     }
   }
 
+  const createExpenseRecord = async (description: string, totalCost: number) => {
+    try {
+      await expensesService.create({
+        category: 'Stock Purchase',
+        description,
+        amount: totalCost,
+        expense_date: new Date().toISOString().split('T')[0]
+      })
+    } catch (error) {
+      console.error('Error creating expense record:', error)
+      throw error
+    }
+  }
+
   const handleSingleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -69,18 +83,27 @@ const AddStock: React.FC = () => {
     try {
       const existingCount = await getExistingCount(singleForm.club, singleForm.player, singleForm.size)
       const sku = generateSKU(singleForm.club, singleForm.player, singleForm.size, existingCount + 1)
+      const cost = parseFloat(singleForm.cost)
 
+      // Create inventory item
       await inventoryService.create({
         sku,
         club: singleForm.club,
         player: singleForm.player || 'No Name',
         size: singleForm.size,
-        cost: parseFloat(singleForm.cost),
+        cost,
         status: 'In Stock',
         purchase_date: new Date().toISOString().split('T')[0]
       })
 
-      setMessage({ type: 'success', text: `Successfully added ${singleForm.club} ${singleForm.player || 'No Name'} (${singleForm.size})` })
+      // Create expense record
+      const expenseDescription = `${singleForm.club} ${singleForm.player || 'No Name'} kit (${singleForm.size})`
+      await createExpenseRecord(expenseDescription, cost)
+
+      setMessage({ 
+        type: 'success', 
+        text: `Successfully added ${singleForm.club} ${singleForm.player || 'No Name'} (${singleForm.size}) and recorded €${cost.toFixed(2)} expense!` 
+      })
       setSingleForm({ club: '', player: '', size: '', cost: '9.20' })
     } catch (error) {
       console.error('Error adding item:', error)
@@ -97,6 +120,7 @@ const AddStock: React.FC = () => {
 
     try {
       const itemsToAdd = []
+      let totalItems = 0
       
       for (const sizeEntry of bulkForm.sizes) {
         if (sizeEntry.quantity > 0) {
@@ -113,19 +137,29 @@ const AddStock: React.FC = () => {
               status: 'In Stock' as const,
               purchase_date: new Date().toISOString().split('T')[0]
             })
+            totalItems++
           }
         }
       }
 
-      // Add all items
+      // Add all inventory items
       for (const item of itemsToAdd) {
         await inventoryService.create(item)
       }
 
-      const totalItems = itemsToAdd.length
+      // Create expense record for the bulk purchase
+      const totalCost = totalItems * parseFloat(bulkForm.cost)
+      const sizeBreakdown = bulkForm.sizes
+        .filter(s => s.quantity > 0)
+        .map(s => `${s.quantity}x ${s.size}`)
+        .join(', ')
+      const expenseDescription = `${bulkForm.club} ${bulkForm.player || 'No Name'} kits (${sizeBreakdown})`
+      
+      await createExpenseRecord(expenseDescription, totalCost)
+
       setMessage({ 
         type: 'success', 
-        text: `Successfully added ${totalItems} items: ${bulkForm.club} ${bulkForm.player || 'No Name'}` 
+        text: `Successfully added ${totalItems} items: ${bulkForm.club} ${bulkForm.player || 'No Name'} and recorded €${totalCost.toFixed(2)} expense!` 
       })
       
       setBulkForm({
@@ -146,6 +180,15 @@ const AddStock: React.FC = () => {
     const updatedSizes = [...bulkForm.sizes]
     updatedSizes[index].quantity = Math.max(0, quantity)
     setBulkForm({ ...bulkForm, sizes: updatedSizes })
+  }
+
+  const getTotalCost = () => {
+    if (activeTab === 'single') {
+      return parseFloat(singleForm.cost) || 0
+    } else {
+      const totalItems = bulkForm.sizes.reduce((sum, size) => sum + size.quantity, 0)
+      return totalItems * (parseFloat(bulkForm.cost) || 0)
+    }
   }
 
   return (
@@ -189,6 +232,20 @@ const AddStock: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Expense Preview */}
+      <div className="bg-blue-50 border-l-4 border-blue-400 p-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <Package className="h-5 w-5 text-blue-400" />
+          </div>
+          <div className="ml-3">
+            <p className="text-sm text-blue-700">
+              <strong>Auto-Expense:</strong> Adding this stock will automatically create a €{getTotalCost().toFixed(2)} expense under "Stock Purchase"
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* Single Item Form */}
       {activeTab === 'single' && (
@@ -256,7 +313,7 @@ const AddStock: React.FC = () => {
               className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              {loading ? 'Adding...' : 'Add Item'}
+              {loading ? 'Adding...' : `Add Item + €${getTotalCost().toFixed(2)} Expense`}
             </button>
           </form>
         </div>
@@ -327,9 +384,10 @@ const AddStock: React.FC = () => {
 
             <div className="bg-gray-50 p-4 rounded-md">
               <h3 className="font-medium text-gray-900 mb-2">Summary</h3>
-              <div className="text-sm text-gray-600">
+              <div className="text-sm text-gray-600 space-y-1">
                 <p>Total items to add: {bulkForm.sizes.reduce((sum, size) => sum + size.quantity, 0)}</p>
-                <p>Total cost: €{(bulkForm.sizes.reduce((sum, size) => sum + size.quantity, 0) * parseFloat(bulkForm.cost || '0')).toFixed(2)}</p>
+                <p>Total inventory cost: €{getTotalCost().toFixed(2)}</p>
+                <p className="font-medium text-blue-600">Auto expense will be created: €{getTotalCost().toFixed(2)}</p>
               </div>
             </div>
 
@@ -339,7 +397,7 @@ const AddStock: React.FC = () => {
               className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <Package className="w-4 h-4" />
-              {loading ? 'Adding...' : `Add ${bulkForm.sizes.reduce((sum, size) => sum + size.quantity, 0)} Items`}
+              {loading ? 'Adding...' : `Add ${bulkForm.sizes.reduce((sum, size) => sum + size.quantity, 0)} Items + €${getTotalCost().toFixed(2)} Expense`}
             </button>
           </form>
         </div>
