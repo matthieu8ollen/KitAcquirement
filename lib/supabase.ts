@@ -64,6 +64,29 @@ export const salesService = {
     
     if (error) throw error
     return data
+  },
+
+  // Update existing sale
+  async update(id: string, updates: Partial<Omit<Sale, 'id' | 'created_at' | 'inventory_id'>>) {
+    const { data, error } = await supabase
+      .from('sales')
+      .update(updates)
+      .eq('id', id)
+      .select()
+    
+    if (error) throw error
+    return data
+  },
+
+  // Delete sale
+  async delete(id: string) {
+    const { data, error } = await supabase
+      .from('sales')
+      .delete()
+      .eq('id', id)
+    
+    if (error) throw error
+    return data
   }
 }
 
@@ -85,6 +108,29 @@ export const expensesService = {
       .from('expenses')
       .insert(expense)
       .select()
+    
+    if (error) throw error
+    return data
+  },
+
+  // Update existing expense
+  async update(id: string, updates: Partial<Omit<Expense, 'id' | 'created_at'>>) {
+    const { data, error } = await supabase
+      .from('expenses')
+      .update(updates)
+      .eq('id', id)
+      .select()
+    
+    if (error) throw error
+    return data
+  },
+
+  // Delete expense
+  async delete(id: string) {
+    const { data, error } = await supabase
+      .from('expenses')
+      .delete()
+      .eq('id', id)
     
     if (error) throw error
     return data
