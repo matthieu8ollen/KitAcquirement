@@ -40,9 +40,9 @@ const DropdownMenu: React.FC<DropdownMenuProps> = ({ items, onAction, title }) =
   
   const availableItems = items.filter(item => item.status !== 'Sold')
   const hasAvailableItems = availableItems.length > 0
+  const hasSoldItems = items.some(item => item.status === 'Sold')
   
-  if (!hasAvailableItems) return null
-
+  if (!hasAvailableItems && !hasSoldItems) return null
   return (
     <div className="relative">
       <button
@@ -753,7 +753,7 @@ const InventoryGrid: React.FC = () => {
                                             onClick={() => handleSellItems(sizeGroup.items, `${clubGroup.club} ${playerGroup.player || 'No Name'} ${sizeGroup.size}`)}
                                             className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
                                           >
-                                            Sell One
+                                            Sell
                                           </button>
                                           <DropdownMenu
                                             items={sizeGroup.items}
