@@ -40,6 +40,17 @@ export const inventoryService = {
     
     if (error) throw error
     return data
+  },
+
+  // Delete inventory item
+  async delete(id: string) {
+    const { data, error } = await supabase
+      .from('inventory')
+      .delete()
+      .eq('id', id)
+    
+    if (error) throw error
+    return data
   }
 }
 
