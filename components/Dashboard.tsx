@@ -33,15 +33,24 @@ const Dashboard: React.FC = () => {
   }
 
   // Calculate metrics
+  const totalInStock = inventory.filter(item => item.status === 'In Stock').length
+  const totalListed = inventory.filter(item => item.status === 'Listed').length
+  const totalSold = inventory.filter(item => item.status === 'Sold').length
+  const totalRevenue = sales.reduce((sum, sale) => sum + sale.sale_price, 0)
+  const totalProfit = sales.reduce((sum, sale) => sum + sale.profit, 0)
+  const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  const netProfit = totalProfit - totalExpenses
+  const sellThroughRate = inventory.length > 0 ? (totalSold / inventory.length) * 100 : 0
+
   const metrics: DashboardMetrics = {
-    totalInStock: inventory.filter(item => item.status === 'In Stock').length,
-    totalListed: inventory.filter(item => item.status === 'Listed').length,
-    totalSold: inventory.filter(item => item.status === 'Sold').length,
-    totalRevenue: sales.reduce((sum, sale) => sum + sale.sale_price, 0),
-    totalProfit: sales.reduce((sum, sale) => sum + sale.profit, 0),
-    totalExpenses: expenses.reduce((sum, expense) => sum + expense.amount, 0),
-    netProfit: sales.reduce((sum, sale) => sum + sale.profit, 0) - expenses.reduce((sum, expense) => sum + expense.amount, 0),
-    sellThroughRate: inventory.length > 0 ? (metrics.totalSold / inventory.length) * 100 : 0
+    totalInStock,
+    totalListed,
+    totalSold,
+    totalRevenue,
+    totalProfit,
+    totalExpenses,
+    netProfit,
+    sellThroughRate
   }
 
   // Chart data
