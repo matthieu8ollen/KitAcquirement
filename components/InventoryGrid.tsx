@@ -1,27 +1,43 @@
 import React, { useState, useEffect } from 'react'
-import { Package, ShoppingCart, CheckCircle, Euro, ChevronDown, ChevronUp } from 'lucide-react'
+import { Package, ShoppingCart, CheckCircle, Euro, ChevronDown, ChevronUp, Users, Shirt } from 'lucide-react'
 import { inventoryService, salesService } from '../lib/supabase'
 import { InventoryItem } from '../types'
 
-interface GroupedItem {
-  club: string
-  player: string | null
+interface SizeGroup {
   size: string
-  cost: number
   items: InventoryItem[]
   inStock: number
   listed: number
   sold: number
 }
 
+interface PlayerGroup {
+  player: string | null
+  sizeGroups: SizeGroup[]
+  totalItems: number
+  inStock: number
+  listed: number
+  sold: number
+}
+
+interface ClubGroup {
+  club: string
+  playerGroups: PlayerGroup[]
+  totalItems: number
+  inStock: number
+  listed: number
+  sold: number
+}
+
 interface SaleModalProps {
-  group: GroupedItem | null
+  selectedItems: InventoryItem[]
   isOpen: boolean
   onClose: () => void
   onSave: () => void
+  title: string
 }
 
-const SaleModal: React.FC<SaleModalProps> = ({ group, isOpen, onClose, onSave }) => {
+const SaleModal: React.FC<SaleModalProps> = ({ selectedItems, isOpen, onClose, onSave, title }) => {
   const [selectedSKU, setSelectedSKU] = useState('')
   const [salePrice, setSalePrice] = useState('20.00')
   const [platform, setPlatform] = useState('Vinted')
@@ -30,32 +46,30 @@ const SaleModal: React.FC<SaleModalProps> = ({ group, isOpen, onClose, onSave })
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (group && group.items.length > 0) {
-      // Default to first available item (In Stock or Listed)
-      const availableItem = group.items.find(item => item.status === 'In Stock' || item.status === 'Listed')
+    if (selectedItems.length > 0) {
+      // Default to first available item
+      const availableItem = selectedItems.find(item => item.status === 'In Stock' || item.status === 'Listed')
       if (availableItem) {
         setSelectedSKU(availableItem.id)
       }
     }
-  }, [group])
+  }, [selectedItems])
+
+  const selectedItem = selectedItems.find(item => item.id === selectedSKU)
 
   const calculateProfit = () => {
     const price = parseFloat(salePrice) || 0
     const fees = parseFloat(platformFees) || 0
     const shipping = parseFloat(shippingCost) || 0
-    const cost = group?.cost || 0
+    const cost = selectedItem?.cost || 0
     return price - fees - shipping - cost
   }
 
   const handleSave = async () => {
-    if (!group || !selectedSKU) return
-
-    const selectedItem = group.items.find(item => item.id === selectedSKU)
     if (!selectedItem) return
 
     setLoading(true)
     try {
-      // Create sale record
       await salesService.create({
         inventory_id: selectedItem.id,
         sale_price: parseFloat(salePrice),
@@ -65,7 +79,6 @@ const SaleModal: React.FC<SaleModalProps> = ({ group, isOpen, onClose, onSave })
         sale_date: new Date().toISOString().split('T')[0]
       })
 
-      // Update inventory status
       await inventoryService.updateStatus(selectedItem.id, 'Sold')
       
       onSave()
@@ -77,16 +90,14 @@ const SaleModal: React.FC<SaleModalProps> = ({ group, isOpen, onClose, onSave })
     }
   }
 
-  if (!isOpen || !group) return null
+  if (!isOpen || selectedItems.length === 0) return null
 
-  const availableItems = group.items.filter(item => item.status === 'In Stock' || item.status === 'Listed')
+  const availableItems = selectedItems.filter(item => item.status === 'In Stock' || item.status === 'Listed')
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg max-w-md w-full p-6">
-        <h3 className="text-lg font-semibold mb-4">
-          Record Sale - {group.club} {group.player || 'No Name'} ({group.size})
-        </h3>
+        <h3 className="text-lg font-semibold mb-4">Record Sale - {title}</h3>
         
         <div className="space-y-4">
           <div>
@@ -158,7 +169,7 @@ const SaleModal: React.FC<SaleModalProps> = ({ group, isOpen, onClose, onSave })
           <div className="bg-gray-50 p-3 rounded-md">
             <div className="flex justify-between text-sm">
               <span>Cost:</span>
-              <span>€{group.cost.toFixed(2)}</span>
+              <span>€{(selectedItem?.cost || 0).toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm font-semibold text-green-600">
               <span>Profit:</span>
@@ -192,9 +203,12 @@ const InventoryGrid: React.FC = () => {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'In Stock' | 'Listed' | 'Sold'>('In Stock')
-  const [selectedGroup, setSelectedGroup] = useState<GroupedItem | null>(null)
+  const [selectedItems, setSelectedItems] = useState<InventoryItem[]>([])
   const [showSaleModal, setShowSaleModal] = useState(false)
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [saleModalTitle, setSaleModalTitle] = useState('')
+  const [expandedClubs, setExpandedClubs] = useState<Set<string>>(new Set())
+  const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set())
+  const [expandedSizes, setExpandedSizes] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchInventory()
@@ -211,55 +225,94 @@ const InventoryGrid: React.FC = () => {
     }
   }
 
-  // Group identical items together
+  // Create hierarchical grouping: Club > Player > Size
   const groupedInventory = React.useMemo(() => {
-    const groups = new Map<string, GroupedItem>()
+    const clubs = new Map<string, ClubGroup>()
     
     inventory.forEach(item => {
-      const key = `${item.club}-${item.player || 'No Name'}-${item.size}`
-      
-      if (!groups.has(key)) {
-        groups.set(key, {
+      // Skip items that don't match the filter
+      if (filter !== 'all') {
+        if (filter === 'In Stock' && item.status !== 'In Stock') return
+        if (filter === 'Listed' && item.status !== 'Listed') return
+        if (filter === 'Sold' && item.status !== 'Sold') return
+      }
+
+      if (!clubs.has(item.club)) {
+        clubs.set(item.club, {
           club: item.club,
-          player: item.player,
-          size: item.size,
-          cost: item.cost,
-          items: [],
+          playerGroups: [],
+          totalItems: 0,
           inStock: 0,
           listed: 0,
           sold: 0
         })
       }
       
-      const group = groups.get(key)!
-      group.items.push(item)
+      const clubGroup = clubs.get(item.club)!
+      const playerName = item.player || 'No Name'
       
-      if (item.status === 'In Stock') group.inStock++
-      else if (item.status === 'Listed') group.listed++
-      else if (item.status === 'Sold') group.sold++
+      let playerGroup = clubGroup.playerGroups.find(p => (p.player || 'No Name') === playerName)
+      if (!playerGroup) {
+        playerGroup = {
+          player: item.player,
+          sizeGroups: [],
+          totalItems: 0,
+          inStock: 0,
+          listed: 0,
+          sold: 0
+        }
+        clubGroup.playerGroups.push(playerGroup)
+      }
+      
+      let sizeGroup = playerGroup.sizeGroups.find(s => s.size === item.size)
+      if (!sizeGroup) {
+        sizeGroup = {
+          size: item.size,
+          items: [],
+          inStock: 0,
+          listed: 0,
+          sold: 0
+        }
+        playerGroup.sizeGroups.push(sizeGroup)
+      }
+      
+      sizeGroup.items.push(item)
+      
+      // Update counts
+      if (item.status === 'In Stock') {
+        sizeGroup.inStock++
+        playerGroup.inStock++
+        clubGroup.inStock++
+      } else if (item.status === 'Listed') {
+        sizeGroup.listed++
+        playerGroup.listed++
+        clubGroup.listed++
+      } else if (item.status === 'Sold') {
+        sizeGroup.sold++
+        playerGroup.sold++
+        clubGroup.sold++
+      }
+      
+      sizeGroup.items.length++
+      playerGroup.totalItems++
+      clubGroup.totalItems++
     })
     
-    return Array.from(groups.values())
-  }, [inventory])
+    return Array.from(clubs.values())
+  }, [inventory, filter])
 
-  const filteredGroups = groupedInventory.filter(group => {
-    if (filter === 'all') return true
-    if (filter === 'In Stock') return group.inStock > 0
-    if (filter === 'Listed') return group.listed > 0
-    if (filter === 'Sold') return group.sold > 0
-    return false
-  })
+  const handleSellItems = (items: InventoryItem[], title: string) => {
+    const availableItems = items.filter(item => item.status === 'In Stock' || item.status === 'Listed')
+    if (availableItems.length === 0) return
+    
+    setSelectedItems(availableItems)
+    setSaleModalTitle(title)
+    setShowSaleModal(true)
+  }
 
-  const handleBulkStatusChange = async (group: GroupedItem, newStatus: 'In Stock' | 'Listed' | 'Sold') => {
-    if (newStatus === 'Sold') {
-      setSelectedGroup(group)
-      setShowSaleModal(true)
-      return
-    }
-
+  const handleBulkStatusChange = async (items: InventoryItem[], newStatus: 'In Stock' | 'Listed') => {
     try {
-      // Update all items in the group that are not sold
-      const availableItems = group.items.filter(item => item.status !== 'Sold')
+      const availableItems = items.filter(item => item.status !== 'Sold')
       for (const item of availableItems) {
         await inventoryService.updateStatus(item.id, newStatus)
       }
@@ -269,36 +322,28 @@ const InventoryGrid: React.FC = () => {
     }
   }
 
-  const handleSingleStatusChange = async (item: InventoryItem, newStatus: 'In Stock' | 'Listed' | 'Sold') => {
-    if (newStatus === 'Sold') {
-      const group = groupedInventory.find(g => 
-        g.club === item.club && 
-        (g.player || 'No Name') === (item.player || 'No Name') && 
-        g.size === item.size
-      )
-      if (group) {
-        setSelectedGroup(group)
-        setShowSaleModal(true)
-      }
-      return
-    }
-
-    try {
-      await inventoryService.updateStatus(item.id, newStatus)
-      fetchInventory()
-    } catch (error) {
-      console.error('Error updating status:', error)
-    }
-  }
-
-  const toggleGroupExpansion = (groupKey: string) => {
-    const newExpanded = new Set(expandedGroups)
-    if (newExpanded.has(groupKey)) {
-      newExpanded.delete(groupKey)
+  const toggleExpansion = (type: 'club' | 'player' | 'size', key: string) => {
+    let setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>
+    let currentExpanded: Set<string>
+    
+    if (type === 'club') {
+      setExpanded = setExpandedClubs
+      currentExpanded = expandedClubs
+    } else if (type === 'player') {
+      setExpanded = setExpandedPlayers
+      currentExpanded = expandedPlayers
     } else {
-      newExpanded.add(groupKey)
+      setExpanded = setExpandedSizes
+      currentExpanded = expandedSizes
     }
-    setExpandedGroups(newExpanded)
+    
+    const newExpanded = new Set(currentExpanded)
+    if (newExpanded.has(key)) {
+      newExpanded.delete(key)
+    } else {
+      newExpanded.add(key)
+    }
+    setExpanded(newExpanded)
   }
 
   const statusCounts = {
@@ -316,7 +361,10 @@ const InventoryGrid: React.FC = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Inventory</h1>
         <div className="text-sm text-gray-500">
-          {filteredGroups.length} groups • {inventory.length} total items
+          {groupedInventory.length} clubs • {inventory.filter(item => {
+            if (filter === 'all') return true
+            return item.status === filter
+          }).length} items
         </div>
       </div>
 
@@ -344,9 +392,9 @@ const InventoryGrid: React.FC = () => {
         </nav>
       </div>
 
-      {/* Grouped Inventory Table */}
+      {/* Hierarchical Inventory Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
-        {filteredGroups.length === 0 ? (
+        {groupedInventory.length === 0 ? (
           <div className="text-center py-12">
             <Package className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No items found</h3>
@@ -356,7 +404,7 @@ const InventoryGrid: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -372,136 +420,233 @@ const InventoryGrid: React.FC = () => {
                     Quantity
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status Summary
+                    Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredGroups.map((group) => {
-                  const groupKey = `${group.club}-${group.player || 'No Name'}-${group.size}`
-                  const isExpanded = expandedGroups.has(groupKey)
-                  const hasAvailableItems = group.inStock > 0 || group.listed > 0
+              <tbody className="bg-white">
+                {groupedInventory.map((clubGroup) => {
+                  const clubKey = clubGroup.club
+                  const isClubExpanded = expandedClubs.has(clubKey)
                   
                   return (
-                    <React.Fragment key={groupKey}>
-                      {/* Group Header Row */}
-                      <tr className="hover:bg-gray-50 bg-gray-25">
+                    <React.Fragment key={clubKey}>
+                      {/* Club Header */}
+                      <tr className="border-b-2 border-gray-200 bg-blue-50">
                         <td className="px-6 py-4">
                           <div className="flex items-center">
                             <button
-                              onClick={() => toggleGroupExpansion(groupKey)}
-                              className="mr-2 text-gray-400 hover:text-gray-600"
+                              onClick={() => toggleExpansion('club', clubKey)}
+                              className="mr-3 text-blue-600 hover:text-blue-800"
                             >
-                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                              {isClubExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                             </button>
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">{group.club}</div>
-                              <div className="text-sm text-gray-500">{group.player || 'No Name'}</div>
+                            <div className="flex items-center">
+                              <Shirt className="w-5 h-5 mr-2 text-blue-600" />
+                              <span className="text-lg font-bold text-blue-900">{clubGroup.club}</span>
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{group.size}</div>
+                        <td className="px-6 py-4 text-sm text-gray-600">All sizes</td>
+                        <td className="px-6 py-4 text-sm text-gray-600">-</td>
+                        <td className="px-6 py-4">
+                          <span className="text-lg font-bold text-blue-900">{clubGroup.totalItems}</span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">€{group.cost.toFixed(2)}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">
-                            {group.items.length} total
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex space-x-1">
-                            {group.inStock > 0 && (
-                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                                <Package className="w-3 h-3 mr-1" />
-                                {group.inStock}
+                        <td className="px-6 py-4">
+                          <div className="flex space-x-2">
+                            {clubGroup.inStock > 0 && (
+                              <span className="inline-flex px-3 py-1 text-sm font-medium rounded-full bg-blue-100 text-blue-800">
+                                {clubGroup.inStock} In Stock
                               </span>
                             )}
-                            {group.listed > 0 && (
-                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
-                                <ShoppingCart className="w-3 h-3 mr-1" />
-                                {group.listed}
+                            {clubGroup.listed > 0 && (
+                              <span className="inline-flex px-3 py-1 text-sm font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                {clubGroup.listed} Listed
                               </span>
                             )}
-                            {group.sold > 0 && (
-                              <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
-                                <CheckCircle className="w-3 h-3 mr-1" />
-                                {group.sold}
+                            {clubGroup.sold > 0 && (
+                              <span className="inline-flex px-3 py-1 text-sm font-medium rounded-full bg-green-100 text-green-800">
+                                {clubGroup.sold} Sold
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {hasAvailableItems && (
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => handleBulkStatusChange(group, 'Listed')}
-                                className="inline-flex items-center px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
-                              >
-                                <ShoppingCart className="w-3 h-3 mr-1" />
-                                List All
-                              </button>
-                              <button
-                                onClick={() => handleBulkStatusChange(group, 'Sold')}
-                                className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                              >
-                                <Euro className="w-3 h-3 mr-1" />
-                                Sell One
-                              </button>
-                            </div>
-                          )}
+                        <td className="px-6 py-4">
+                          <span className="text-sm text-gray-500">Expand to see actions</span>
                         </td>
                       </tr>
 
-                      {/* Individual Items (when expanded) */}
-                      {isExpanded && group.items.map((item) => (
-                        <tr key={item.id} className="bg-gray-50">
-                          <td className="px-6 py-2 pl-12">
-                            <div className="text-xs font-mono text-gray-600">{item.sku}</div>
-                          </td>
-                          <td className="px-6 py-2">
-                            <div className="text-xs text-gray-600">-</div>
-                          </td>
-                          <td className="px-6 py-2">
-                            <div className="text-xs text-gray-600">-</div>
-                          </td>
-                          <td className="px-6 py-2">
-                            <div className="text-xs text-gray-600">Individual</div>
-                          </td>
-                          <td className="px-6 py-2">
-                            <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                              item.status === 'In Stock' ? 'bg-blue-100 text-blue-800' :
-                              item.status === 'Listed' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-green-100 text-green-800'
-                            }`}>
-                              {item.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-2">
-                            {item.status !== 'Sold' && (
-                              <div className="flex space-x-1">
-                                <button
-                                  onClick={() => handleSingleStatusChange(item, item.status === 'In Stock' ? 'Listed' : 'In Stock')}
-                                  className="inline-flex items-center px-1 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700"
-                                >
-                                  {item.status === 'In Stock' ? 'List' : 'Unlist'}
-                                </button>
-                                <button
-                                  onClick={() => handleSingleStatusChange(item, 'Sold')}
-                                  className="inline-flex items-center px-1 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
-                                >
-                                  Sell
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {/* Player Groups */}
+                      {isClubExpanded && clubGroup.playerGroups.map((playerGroup) => {
+                        const playerKey = `${clubKey}-${playerGroup.player || 'No Name'}`
+                        const isPlayerExpanded = expandedPlayers.has(playerKey)
+                        
+                        return (
+                          <React.Fragment key={playerKey}>
+                            {/* Player Header */}
+                            <tr className="border-b border-gray-100 bg-gray-50">
+                              <td className="px-6 py-3">
+                                <div className="flex items-center pl-8">
+                                  <button
+                                    onClick={() => toggleExpansion('player', playerKey)}
+                                    className="mr-3 text-gray-600 hover:text-gray-800"
+                                  >
+                                    {isPlayerExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                  </button>
+                                  <div className="flex items-center">
+                                    <Users className="w-4 h-4 mr-2 text-gray-600" />
+                                    <span className="font-medium text-gray-900">{playerGroup.player || 'No Name'}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-3 text-sm text-gray-600">All sizes</td>
+                              <td className="px-6 py-3 text-sm text-gray-600">-</td>
+                              <td className="px-6 py-3">
+                                <span className="font-medium text-gray-900">{playerGroup.totalItems}</span>
+                              </td>
+                              <td className="px-6 py-3">
+                                <div className="flex space-x-1">
+                                  {playerGroup.inStock > 0 && (
+                                    <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                                      {playerGroup.inStock}
+                                    </span>
+                                  )}
+                                  {playerGroup.listed > 0 && (
+                                    <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                      {playerGroup.listed}
+                                    </span>
+                                  )}
+                                  {playerGroup.sold > 0 && (
+                                    <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                      {playerGroup.sold}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-3">
+                                <span className="text-xs text-gray-500">Expand for actions</span>
+                              </td>
+                            </tr>
+
+                            {/* Size Groups */}
+                            {isPlayerExpanded && playerGroup.sizeGroups.map((sizeGroup) => {
+                              const sizeKey = `${playerKey}-${sizeGroup.size}`
+                              const isSizeExpanded = expandedSizes.has(sizeKey)
+                              const hasAvailable = sizeGroup.inStock > 0 || sizeGroup.listed > 0
+                              
+                              return (
+                                <React.Fragment key={sizeKey}>
+                                  {/* Size Header */}
+                                  <tr className="hover:bg-gray-25">
+                                    <td className="px-6 py-3">
+                                      <div className="flex items-center pl-16">
+                                        <button
+                                          onClick={() => toggleExpansion('size', sizeKey)}
+                                          className="mr-3 text-gray-400 hover:text-gray-600"
+                                        >
+                                          {isSizeExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                        </button>
+                                        <span className="text-sm text-gray-700">Size {sizeGroup.size}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                      <span className="font-medium text-gray-900">{sizeGroup.size}</span>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                      <span className="text-sm text-gray-900">€{sizeGroup.items[0]?.cost.toFixed(2)}</span>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                      <span className="text-sm font-medium text-gray-900">{sizeGroup.items.length}</span>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                      <div className="flex space-x-1">
+                                        {sizeGroup.inStock > 0 && (
+                                          <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
+                                            <Package className="w-3 h-3 mr-1" />
+                                            {sizeGroup.inStock}
+                                          </span>
+                                        )}
+                                        {sizeGroup.listed > 0 && (
+                                          <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-800">
+                                            <ShoppingCart className="w-3 h-3 mr-1" />
+                                            {sizeGroup.listed}
+                                          </span>
+                                        )}
+                                        {sizeGroup.sold > 0 && (
+                                          <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                                            <CheckCircle className="w-3 h-3 mr-1" />
+                                            {sizeGroup.sold}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                      {hasAvailable && (
+                                        <div className="flex space-x-2">
+                                          <button
+                                            onClick={() => handleBulkStatusChange(sizeGroup.items, 'Listed')}
+                                            className="inline-flex items-center px-2 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
+                                          >
+                                            List All
+                                          </button>
+                                          <button
+                                            onClick={() => handleSellItems(sizeGroup.items, `${clubGroup.club} ${playerGroup.player || 'No Name'} ${sizeGroup.size}`)}
+                                            className="inline-flex items-center px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                                          >
+                                            Sell One
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+
+                                  {/* Individual Items */}
+                                  {isSizeExpanded && sizeGroup.items.map((item) => (
+                                    <tr key={item.id} className="bg-gray-25">
+                                      <td className="px-6 py-2">
+                                        <div className="pl-24 text-xs font-mono text-gray-600">{item.sku}</div>
+                                      </td>
+                                      <td className="px-6 py-2 text-xs text-gray-500">-</td>
+                                      <td className="px-6 py-2 text-xs text-gray-500">-</td>
+                                      <td className="px-6 py-2 text-xs text-gray-500">Individual</td>
+                                      <td className="px-6 py-2">
+                                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                                          item.status === 'In Stock' ? 'bg-blue-100 text-blue-800' :
+                                          item.status === 'Listed' ? 'bg-yellow-100 text-yellow-800' :
+                                          'bg-green-100 text-green-800'
+                                        }`}>
+                                          {item.status}
+                                        </span>
+                                      </td>
+                                      <td className="px-6 py-2">
+                                        {item.status !== 'Sold' && (
+                                          <div className="flex space-x-1">
+                                            <button
+                                              onClick={() => inventoryService.updateStatus(item.id, item.status === 'In Stock' ? 'Listed' : 'In Stock').then(fetchInventory)}
+                                              className="inline-flex items-center px-1 py-1 bg-gray-600 text-white text-xs rounded hover:bg-gray-700"
+                                            >
+                                              {item.status === 'In Stock' ? 'List' : 'Unlist'}
+                                            </button>
+                                            <button
+                                              onClick={() => handleSellItems([item], `${item.club} ${item.player || 'No Name'} ${item.size}`)}
+                                              className="inline-flex items-center px-1 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                                            >
+                                              Sell
+                                            </button>
+                                          </div>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </React.Fragment>
+                              )
+                            })}
+                          </React.Fragment>
+                        )
+                      })}
                     </React.Fragment>
                   )
                 })}
@@ -513,13 +658,14 @@ const InventoryGrid: React.FC = () => {
 
       {/* Sale Modal */}
       <SaleModal
-        group={selectedGroup}
+        selectedItems={selectedItems}
         isOpen={showSaleModal}
         onClose={() => {
           setShowSaleModal(false)
-          setSelectedGroup(null)
+          setSelectedItems([])
         }}
         onSave={fetchInventory}
+        title={saleModalTitle}
       />
     </div>
   )
